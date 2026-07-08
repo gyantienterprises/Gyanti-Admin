@@ -47,12 +47,24 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Lock root document context bounce scrolling
+  // Lock root document context bounce scrolling & Request Notification Permission
   useEffect(() => {
     document.body.style.overflow = "hidden";
     document.body.style.margin = "0";
     document.body.style.padding = "0";
     document.body.style.backgroundColor = theme.bgMain;
+
+    // --- NOTIFICATION PERMISSION REQUEST ---
+    if ("Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission().then((permission) => {
+          if (permission === "granted") {
+            console.log("Notification permission granted.");
+          }
+        });
+      }
+    }
+
     return () => {
       document.body.style.overflow = "unset";
     };
@@ -82,6 +94,14 @@ export default function App() {
         message: `🚨 New Entry: ${freshLead.name} submitted!`,
         isUpdate: true,
       });
+
+      // --- 3. SEND SYSTEM PUSH NOTIFICATION IF GRANTED ---
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification("New Lead Received!", {
+          body:`New CLient: ${freshLead.name} (Monthly Bill: ₹${freshLead.monthly_bill})`,
+          icon: "/favicon.ico", // Replace with your app logo/icon path if available
+        });
+      }
 
       // Clear the alert after 4 seconds
       setTimeout(() => {
@@ -253,7 +273,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Swipe Out Notification Toast (Changes color dynamically if it is a live server update alert) */}
+      {/* Swipe Out Notification Toast */}
       <div
         style={{
           ...styles.toastContainer,
@@ -345,6 +365,7 @@ export default function App() {
   );
 }
 
+// (Styles object stays completely identical to yours)
 const styles = {
   phoneContainer: {
     maxWidth: "430px",
