@@ -26,13 +26,26 @@ const theme = {
   accentSecondary: "#ff7a18",
 };
 
+// Helper utility converting standard VAPID string block payload to raw Uint8 buffer maps
+const urlB64ToUint8Array = (base64String) => {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, "+")
+    .replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+};
+
 export default function App() {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("unseen");
 
-  // Toast & Modal Layout States
   const [toast, setToast] = useState({
     visible: false,
     message: "",
@@ -48,29 +61,54 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Track the active service worker for stable mobile delivery
-  const [swRegistration, setSwRegistration] = useState(null);
-
-  // --- ONE INITIALIZATION LOOP FOR LAYOUT & SERVICE WORKER ---
+  // --- DEVICE SYSTEM PUSH HANDSHAKE REGISTRATION ---
   useEffect(() => {
     document.body.style.overflow = "hidden";
     document.body.style.margin = "0";
     document.body.style.padding = "0";
     document.body.style.backgroundColor = theme.bgMain;
 
-    if ("serviceWorker" in navigator && "Notification" in window) {
+    if ("serviceWorker" in navigator && "PushManager" in window) {
       navigator.serviceWorker
         .register("/sw.js")
-        .then((reg) => {
-          setSwRegistration(reg);
-          console.log("Service Worker active on scope:", reg.scope);
+        .then(async (registration) => {
+          console.log(
+            "Service Worker active on scope context routing:",
+            registration.scope,
+          );
 
-          if (Notification.permission === "default") {
-            Notification.requestPermission();
+          const permissionStatus = await Notification.requestPermission();
+          if (permissionStatus === "granted") {
+            const publicVapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+
+            try {
+              let subscription =
+                await registration.pushManager.getSubscription();
+
+              // Register new subscription parameters if empty reference mapping found
+              if (!subscription) {
+                subscription = await registration.pushManager.subscribe({
+                  userVisibleOnly: true,
+                  applicationServerKey: urlB64ToUint8Array(publicVapidKey),
+                });
+              }
+
+              // Send the PWA device mapping straight to persistent relational engine structures
+              await fetch(`${API_BASE_URL}/api/register-device`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ subscription }),
+              });
+            } catch (subscriptionError) {
+              console.error(
+                "VAPID device binding negotiation failure:",
+                subscriptionError,
+              );
+            }
           }
         })
         .catch((err) =>
-          console.error("Service Worker configuration failed:", err),
+          console.error("Service worker mapping integration drop error:", err),
         );
     }
 
@@ -79,63 +117,45 @@ export default function App() {
     };
   }, []);
 
-  // --- REAL-TIME LIVE LISTENER SYSTEM ---
+  // --- REAL-TIME STREAMING BROADCAST INTERFACE HANDLER ---
   useEffect(() => {
     const eventSource = new EventSource(
       `${API_BASE_URL}/api/admin/leads/stream`,
-      { withCredentials: true },
+      {
+        withCredentials: true,
+      },
     );
 
     eventSource.onmessage = (event) => {
       const freshLead = JSON.parse(event.data);
 
-      // 1. Prepend the new submission instantly to local view state array
       setLeads((prevLeads) => {
         if (prevLeads.some((lead) => lead.id === freshLead.id))
           return prevLeads;
         return [freshLead, ...prevLeads];
       });
 
-      // 2. Fire a distinct live slide-out toast alert from the right-bottom corner
       setToast({
         visible: true,
         message: `🚨 New Entry: ${freshLead.name} submitted!`,
         isUpdate: true,
       });
 
-      // --- 3. SEND SYSTEM PUSH NOTIFICATION VIA SERVICE WORKER ---
-      if (Notification.permission === "granted") {
-        const title = "New Lead Received!";
-        const bodyText = `New Client: ${freshLead.name} (Monthly Bill: ₹${freshLead.monthly_bill})`;
-
-        if (swRegistration) {
-          swRegistration.showNotification(title, {
-            body: bodyText,
-            icon: "/icon-192.png",
-            badge: "/icon-192.png",
-            vibrate: [200, 100, 200],
-          });
-        } else {
-          new Notification(title, { body: bodyText });
-        }
-      }
-
-      // Clear the alert after 4 seconds
       setTimeout(() => {
         setToast({ visible: false, message: "", isUpdate: false });
       }, 4000);
     };
 
     eventSource.onerror = () => {
-      console.log(
-        "Stream temporarily disconnected. Retrying stream handshake automatically...",
+      console.warn(
+        "SSE interface socket dropped. Disconnecting reference node layer safely.",
       );
     };
 
     return () => {
       eventSource.close();
     };
-  }, [swRegistration]); // Re-bind when service worker registers successfully
+  }, []);
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -145,7 +165,8 @@ export default function App() {
         method: "GET",
         headers: { "Content-Type": "application/json" },
       });
-      if (!response.ok) throw new Error("Failed to fetch records from server.");
+      if (!response.ok)
+        throw new Error("Could not fetch updated system matrix indexes.");
       const data = await response.json();
       setLeads(data);
     } catch (err) {
@@ -160,12 +181,9 @@ export default function App() {
   }, []);
 
   const toggleLeadStatus = (id) => {
-    let updated;
-    if (attemptedIds.includes(id)) {
-      updated = attemptedIds.filter((itemId) => itemId !== id);
-    } else {
-      updated = [...attemptedIds, id];
-    }
+    const updated = attemptedIds.includes(id)
+      ? attemptedIds.filter((itemId) => itemId !== id)
+      : [...attemptedIds, id];
     setAttemptedIds(updated);
     localStorage.setItem("solar_attempted_ids", JSON.stringify(updated));
   };
@@ -190,7 +208,9 @@ export default function App() {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
       });
-      if (!response.ok) throw new Error("Failed to delete entry");
+      if (!response.ok)
+        throw new Error("Server declined entry isolation drop mapping logic.");
+
       setLeads(leads.filter((lead) => lead.id !== id));
       const updatedAttempted = attemptedIds.filter((itemId) => itemId !== id);
       setAttemptedIds(updatedAttempted);
@@ -199,7 +219,7 @@ export default function App() {
         JSON.stringify(updatedAttempted),
       );
     } catch (err) {
-      alert(`Error: ${err.message}`);
+      alert(`Error context sequence failure: ${err.message}`);
     }
   };
 
@@ -290,14 +310,14 @@ export default function App() {
         )}
       </main>
 
-      {/* Swipe Out Notification Toast */}
+      {/* Slide-out Visual Banner Notification */}
       <div
         style={{
           ...styles.toastContainer,
           backgroundColor: toast.isUpdate
             ? theme.accentSecondary
             : theme.brandDark,
-          transform: toast.visible ? "translateX(0)" : "translateX(120%)",
+          transform: toast.visible ? "translateX(0)" : "translateX(150%)",
           opacity: toast.visible ? 1 : 0,
         }}
       >
@@ -309,7 +329,7 @@ export default function App() {
         <span>{toast.message}</span>
       </div>
 
-      {/* Custom Center Modal Confirmation overlay */}
+      {/* Action Overlay Confirmation Container Block */}
       {deleteModal.visible && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContent}>
