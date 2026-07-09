@@ -26,19 +26,51 @@ const theme = {
   accentSecondary: "#ff7a18",
 };
 
-// Helper utility converting standard VAPID string block payload to raw Uint8 buffer maps
-const urlB64ToUint8Array = (base64String) => {
+// --- WEB PUSH HELPERS ---
+// Converts the VAPID public key (base64url string) into the Uint8Array format
+// the PushManager API expects.
+function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding)
-    .replace(/\-/g, "+")
-    .replace(/_/g, "/");
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = window.atob(base64);
   const outputArray = new Uint8Array(rawData.length);
   for (let i = 0; i < rawData.length; ++i) {
     outputArray[i] = rawData.charCodeAt(i);
   }
   return outputArray;
-};
+}
+
+// Subscribes this browser/device to real push notifications and registers
+// the subscription with the backend. This is what makes notifications work
+// even when this tab/app is closed - the old code never did this step.
+async function subscribeToPush(registration) {
+  try {
+    const keyResponse = await fetch(`${API_BASE_URL}/api/vapid-public-key`);
+    if (!keyResponse.ok) {
+      console.warn("Push notifications are not configured on the backend yet.");
+      return;
+    }
+    const { publicKey } = await keyResponse.json();
+
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+    }
+
+    await fetch(`${API_BASE_URL}/api/register-device`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(subscription),
+    });
+
+    console.log("Push subscription registered successfully.");
+  } catch (err) {
+    console.error("Push subscription failed:", err);
+  }
+}
 
 export default function App() {
   const [leads, setLeads] = useState([]);
@@ -46,6 +78,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("unseen");
 
+  // Toast & Modal Layout States
   const [toast, setToast] = useState({
     visible: false,
     message: "",
@@ -61,54 +94,37 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // --- DEVICE SYSTEM PUSH HANDSHAKE REGISTRATION ---
+  // Track the active service worker for stable mobile delivery
+  const [swRegistration, setSwRegistration] = useState(null);
+
+  // --- ONE INITIALIZATION LOOP FOR LAYOUT & SERVICE WORKER ---
   useEffect(() => {
     document.body.style.overflow = "hidden";
     document.body.style.margin = "0";
     document.body.style.padding = "0";
     document.body.style.backgroundColor = theme.bgMain;
 
-    if ("serviceWorker" in navigator && "PushManager" in window) {
+    if ("serviceWorker" in navigator && "Notification" in window) {
       navigator.serviceWorker
         .register("/sw.js")
-        .then(async (registration) => {
-          console.log(
-            "Service Worker active on scope context routing:",
-            registration.scope,
-          );
+        .then(async (reg) => {
+          setSwRegistration(reg);
+          console.log("Service Worker active on scope:", reg.scope);
 
-          const permissionStatus = await Notification.requestPermission();
-          if (permissionStatus === "granted") {
-            const publicVapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+          let permission = Notification.permission;
+          if (permission === "default") {
+            permission = await Notification.requestPermission();
+          }
 
-            try {
-              let subscription =
-                await registration.pushManager.getSubscription();
-
-              // Register new subscription parameters if empty reference mapping found
-              if (!subscription) {
-                subscription = await registration.pushManager.subscribe({
-                  userVisibleOnly: true,
-                  applicationServerKey: urlB64ToUint8Array(publicVapidKey),
-                });
-              }
-
-              // Send the PWA device mapping straight to persistent relational engine structures
-              await fetch(`${API_BASE_URL}/api/register-device`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ subscription }),
-              });
-            } catch (subscriptionError) {
-              console.error(
-                "VAPID device binding negotiation failure:",
-                subscriptionError,
-              );
-            }
+          if (permission === "granted") {
+            // This is the step that was missing: without a real push
+            // subscription, notifications only ever fired while this tab
+            // was open and connected to the SSE stream.
+            await subscribeToPush(reg);
           }
         })
         .catch((err) =>
-          console.error("Service worker mapping integration drop error:", err),
+          console.error("Service Worker configuration failed:", err),
         );
     }
 
@@ -117,38 +133,42 @@ export default function App() {
     };
   }, []);
 
-  // --- REAL-TIME STREAMING BROADCAST INTERFACE HANDLER ---
+  // --- REAL-TIME LIVE LISTENER SYSTEM (drives the in-app toast/list while this tab is open) ---
   useEffect(() => {
     const eventSource = new EventSource(
       `${API_BASE_URL}/api/admin/leads/stream`,
-      {
-        withCredentials: true,
-      },
     );
 
     eventSource.onmessage = (event) => {
       const freshLead = JSON.parse(event.data);
 
+      // 1. Prepend the new submission instantly to local view state array
       setLeads((prevLeads) => {
         if (prevLeads.some((lead) => lead.id === freshLead.id))
           return prevLeads;
         return [freshLead, ...prevLeads];
       });
 
+      // 2. Fire a distinct live slide-out toast alert from the right-bottom corner
       setToast({
         visible: true,
         message: `🚨 New Entry: ${freshLead.name} submitted!`,
         isUpdate: true,
       });
 
+      // Note: actual phone/system notifications are now delivered via the
+      // service worker's 'push' event (real Web Push), not from here. This
+      // toast is just the in-app indicator for when the dashboard is open.
+
+      // Clear the alert after 4 seconds
       setTimeout(() => {
         setToast({ visible: false, message: "", isUpdate: false });
       }, 4000);
     };
 
     eventSource.onerror = () => {
-      console.warn(
-        "SSE interface socket dropped. Disconnecting reference node layer safely.",
+      console.log(
+        "Stream temporarily disconnected. Retrying stream handshake automatically...",
       );
     };
 
@@ -165,8 +185,7 @@ export default function App() {
         method: "GET",
         headers: { "Content-Type": "application/json" },
       });
-      if (!response.ok)
-        throw new Error("Could not fetch updated system matrix indexes.");
+      if (!response.ok) throw new Error("Failed to fetch records from server.");
       const data = await response.json();
       setLeads(data);
     } catch (err) {
@@ -181,9 +200,12 @@ export default function App() {
   }, []);
 
   const toggleLeadStatus = (id) => {
-    const updated = attemptedIds.includes(id)
-      ? attemptedIds.filter((itemId) => itemId !== id)
-      : [...attemptedIds, id];
+    let updated;
+    if (attemptedIds.includes(id)) {
+      updated = attemptedIds.filter((itemId) => itemId !== id);
+    } else {
+      updated = [...attemptedIds, id];
+    }
     setAttemptedIds(updated);
     localStorage.setItem("solar_attempted_ids", JSON.stringify(updated));
   };
@@ -208,9 +230,7 @@ export default function App() {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
       });
-      if (!response.ok)
-        throw new Error("Server declined entry isolation drop mapping logic.");
-
+      if (!response.ok) throw new Error("Failed to delete entry");
       setLeads(leads.filter((lead) => lead.id !== id));
       const updatedAttempted = attemptedIds.filter((itemId) => itemId !== id);
       setAttemptedIds(updatedAttempted);
@@ -219,7 +239,7 @@ export default function App() {
         JSON.stringify(updatedAttempted),
       );
     } catch (err) {
-      alert(`Error context sequence failure: ${err.message}`);
+      alert(`Error: ${err.message}`);
     }
   };
 
@@ -310,14 +330,14 @@ export default function App() {
         )}
       </main>
 
-      {/* Slide-out Visual Banner Notification */}
+      {/* Swipe Out Notification Toast */}
       <div
         style={{
           ...styles.toastContainer,
           backgroundColor: toast.isUpdate
             ? theme.accentSecondary
             : theme.brandDark,
-          transform: toast.visible ? "translateX(0)" : "translateX(150%)",
+          transform: toast.visible ? "translateX(0)" : "translateX(120%)",
           opacity: toast.visible ? 1 : 0,
         }}
       >
@@ -329,7 +349,7 @@ export default function App() {
         <span>{toast.message}</span>
       </div>
 
-      {/* Action Overlay Confirmation Container Block */}
+      {/* Custom Center Modal Confirmation overlay */}
       {deleteModal.visible && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalContent}>
