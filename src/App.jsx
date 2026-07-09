@@ -48,22 +48,30 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Lock root document context bounce scrolling & Request Notification Permission
+  // Track the active service worker for stable mobile delivery
+  const [swRegistration, setSwRegistration] = useState(null);
+
+  // --- ONE INITIALIZATION LOOP FOR LAYOUT & SERVICE WORKER ---
   useEffect(() => {
     document.body.style.overflow = "hidden";
     document.body.style.margin = "0";
     document.body.style.padding = "0";
     document.body.style.backgroundColor = theme.bgMain;
 
-    // --- NOTIFICATION PERMISSION REQUEST ---
-    if ("Notification" in window) {
-      if (Notification.permission === "default") {
-        Notification.requestPermission().then((permission) => {
-          if (permission === "granted") {
-            console.log("Notification permission granted.");
+    if ("serviceWorker" in navigator && "Notification" in window) {
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then((reg) => {
+          setSwRegistration(reg);
+          console.log("Service Worker active on scope:", reg.scope);
+
+          if (Notification.permission === "default") {
+            Notification.requestPermission();
           }
-        });
-      }
+        })
+        .catch((err) =>
+          console.error("Service Worker configuration failed:", err),
+        );
     }
 
     return () => {
@@ -73,7 +81,6 @@ export default function App() {
 
   // --- REAL-TIME LIVE LISTENER SYSTEM ---
   useEffect(() => {
-    // Connect to the backend Server-Sent Events stream
     const eventSource = new EventSource(
       `${API_BASE_URL}/api/admin/leads/stream`,
     );
@@ -81,9 +88,8 @@ export default function App() {
     eventSource.onmessage = (event) => {
       const freshLead = JSON.parse(event.data);
 
-      // 1. Prepend the new submission instantly to the local state view array
+      // 1. Prepend the new submission instantly to local view state array
       setLeads((prevLeads) => {
-        // Prevent duplicate appending if reload is clicked at the same exact time
         if (prevLeads.some((lead) => lead.id === freshLead.id))
           return prevLeads;
         return [freshLead, ...prevLeads];
@@ -96,12 +102,21 @@ export default function App() {
         isUpdate: true,
       });
 
-      // --- 3. SEND SYSTEM PUSH NOTIFICATION IF GRANTED ---
-      if ("Notification" in window && Notification.permission === "granted") {
-        new Notification("New Lead Received!", {
-          body: `New CLient: ${freshLead.name} (Monthly Bill: ₹${freshLead.monthly_bill})`,
-          icon: "/favicon.ico", // Replace with your app logo/icon path if available
-        });
+      // --- 3. SEND SYSTEM PUSH NOTIFICATION VIA SERVICE WORKER ---
+      if (Notification.permission === "granted") {
+        const title = "New Lead Received!";
+        const bodyText = `New Client: ${freshLead.name} (Monthly Bill: ₹${freshLead.monthly_bill})`;
+
+        if (swRegistration) {
+          swRegistration.showNotification(title, {
+            body: bodyText,
+            icon: "/icon-192.png",
+            badge: "/icon-192.png",
+            vibrate: [200, 100, 200],
+          });
+        } else {
+          new Notification(title, { body: bodyText });
+        }
       }
 
       // Clear the alert after 4 seconds
@@ -117,9 +132,9 @@ export default function App() {
     };
 
     return () => {
-      eventSource.close(); // Clean up connection on component unmount
+      eventSource.close();
     };
-  }, []);
+  }, [swRegistration]); // Re-bind when service worker registers successfully
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -366,28 +381,25 @@ export default function App() {
   );
 }
 
-// (Styles object stays completely identical to yours)
 const styles = {
   phoneContainer: {
     maxWidth: "430px",
     margin: "0 auto",
     backgroundColor: theme.bgMain,
-    // Changed to dynamic viewport height to handle mobile Chrome address bars cleanly
     height: "100dvh",
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     display: "flex",
-    flexDirection: "column", // Converts parent into a vertical flex stack
+    flexDirection: "column",
     boxShadow: "0 0 20px rgba(0,0,0,0.05)",
     position: "relative",
     overflow: "hidden",
   },
   scrollContainer: {
     padding: "16px",
-    flex: 1, // Dynamically stretches to consume all remaining empty space
-    overflowY: "auto", // Allows natural scrolling inside this container only
+    flex: 1,
+    overflowY: "auto",
     paddingBottom: "16px",
-    // Removed hardcoded height calc formulas that cause layout breakage
   },
   leadCard: {
     backgroundColor: theme.bgSecondary,
@@ -548,7 +560,6 @@ const styles = {
   modalCancelBtn: { backgroundColor: theme.surface, color: theme.textPrimary },
   modalConfirmBtn: { backgroundColor: "#cf222e", color: "#ffffff" },
   footerBar: {
-    // Removed position absolute/bottom properties to prevent overlapping
     height: "52px",
     backgroundColor: theme.bgSecondary,
     borderTop: `1px solid ${theme.surface}`,
