@@ -11,7 +11,8 @@ import {
   FiBell,
 } from "react-icons/fi";
 
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+const API_BASE_URL =
+  import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 const theme = {
   bgMain: "#f7f8fb",
@@ -98,7 +99,7 @@ export default function App() {
       // --- 3. SEND SYSTEM PUSH NOTIFICATION IF GRANTED ---
       if ("Notification" in window && Notification.permission === "granted") {
         new Notification("New Lead Received!", {
-          body:`New CLient: ${freshLead.name} (Monthly Bill: ₹${freshLead.monthly_bill})`,
+          body: `New CLient: ${freshLead.name} (Monthly Bill: ₹${freshLead.monthly_bill})`,
           icon: "/favicon.ico", // Replace with your app logo/icon path if available
         });
       }
@@ -371,22 +372,22 @@ const styles = {
     maxWidth: "430px",
     margin: "0 auto",
     backgroundColor: theme.bgMain,
-    height: "100vh",
-    maxHeight: "100vh",
+    // Changed to dynamic viewport height to handle mobile Chrome address bars cleanly
+    height: "100dvh",
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     display: "flex",
-    flexDirection: "column",
+    flexDirection: "column", // Converts parent into a vertical flex stack
     boxShadow: "0 0 20px rgba(0,0,0,0.05)",
     position: "relative",
     overflow: "hidden",
   },
   scrollContainer: {
     padding: "16px",
-    flex: 1,
-    overflowY: "auto",
-    paddingBottom: "80px",
-    height: "calc(100vh - 52px)",
+    flex: 1, // Dynamically stretches to consume all remaining empty space
+    overflowY: "auto", // Allows natural scrolling inside this container only
+    paddingBottom: "16px",
+    // Removed hardcoded height calc formulas that cause layout breakage
   },
   leadCard: {
     backgroundColor: theme.bgSecondary,
@@ -547,10 +548,7 @@ const styles = {
   modalCancelBtn: { backgroundColor: theme.surface, color: theme.textPrimary },
   modalConfirmBtn: { backgroundColor: "#cf222e", color: "#ffffff" },
   footerBar: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
+    // Removed position absolute/bottom properties to prevent overlapping
     height: "52px",
     backgroundColor: theme.bgSecondary,
     borderTop: `1px solid ${theme.surface}`,
@@ -558,6 +556,7 @@ const styles = {
     padding: "6px 8px",
     gap: "6px",
     zIndex: 20,
+    flexShrink: 0,
   },
   navButton: {
     flex: 1,
