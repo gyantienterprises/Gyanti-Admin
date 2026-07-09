@@ -83,6 +83,7 @@ export default function App() {
   useEffect(() => {
     const eventSource = new EventSource(
       `${API_BASE_URL}/api/admin/leads/stream`,
+      { withCredentials: true },
     );
 
     eventSource.onmessage = (event) => {
