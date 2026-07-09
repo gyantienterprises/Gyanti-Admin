@@ -11,7 +11,7 @@ import {
   FiBell,
 } from "react-icons/fi";
 
-const API_BASE_URL = import.meta.env.BACKEND_URL || "http://localhost:5000";
+const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 const theme = {
   bgMain: "#f7f8fb",
